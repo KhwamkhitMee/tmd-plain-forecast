@@ -32,8 +32,6 @@ from tmd_plain.prep.units import split_units, unit_id
 _NUM = r"\d+(?:\.\d+)?"
 _DIRS = "ตะวันออกเฉียงเหนือ|ตะวันออกเฉียงใต้|ตะวันตกเฉียงเหนือ|ตะวันตกเฉียงใต้|ตะวันออก|ตะวันตก|เหนือ|ใต้|แปรปรวน"
 _SPACE = re.compile(r"\s+")
-# คำในวงเล็บหลังร้อยละของพื้นที่ (รายวันใช้ "พื้นที่ภาค")
-AREA_WORD = "พื้นที่ทะเลบริเวณนี้"
 
 
 def _num_of(s: str) -> int | float:
@@ -118,9 +116,7 @@ def _overview_line(unit: OverviewUnit) -> SummaryLine:
 
 def _lines(lines: tuple[str, ...]) -> list[SummaryLine]:
     # gl={} : ไม่มีอภิธานฝนของเดินเรือ ("daily" ใช้เป็นชนิดของแม่แบบเท่านั้น ไม่ได้ใช้เกณฑ์ของรายวัน)
-    return build_lines(
-        extract_block(lines, SHIPPING_PATTERNS), lines, "daily", gl={}, area_word=AREA_WORD
-    )
+    return build_lines(extract_block(lines, SHIPPING_PATTERNS), lines, "daily", gl={})
 
 
 def area_facts(block: SeaBlock) -> list[Fact]:

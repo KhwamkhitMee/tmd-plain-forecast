@@ -1,9 +1,9 @@
 """แม่แบบประโยคภาษาง่ายจากค่าที่ดึงได้ (ขั้น 3): หนึ่ง SummaryLine ต่อชนิด (ลม/คลื่นแยกตามเขตลม).
 
-กติกา (สเปกหัวข้อ 4 + ADR 0013):
-- ตัวเลขและชื่อจังหวัดมาจากค่าใน facts ของบรรทัดต้นฉบับเท่านั้น
-- ค่าที่คำนวณ (ร้อยละพื้นที่ -> ราว N ใน 10 ส่วน) อยู่ในวงเล็บหลังตัวเลขต้นฉบับ และเก็บสูตรใน facts
-- คำอธิบายระดับใช้อภิธานจากหมายเหตุของ TMD เท่านั้น
+กติกา (สเปกหัวข้อ 4 + ADR 0013 ที่แก้โดย ADR 0020):
+- ตัวเลขและชื่อจังหวัดมาจากค่าใน facts ของบรรทัดต้นฉบับเท่านั้น ไม่มีค่าที่คำนวณในข้อความ
+- ข้อความกระชับ ไม่มีวงเล็บขยายความ: รายชื่อจังหวัดอยู่ใน detail, ความหมายระดับฝน/ความหนาวอยู่ใน notes
+- ความหมายระดับใช้อภิธานจากหมายเหตุของ TMD เท่านั้น
 - "ร้อยละ N ของพื้นที่" คือสัดส่วนพื้นที่ ห้ามเขียนเป็นโอกาส/ความน่าจะเป็น
 """
 
@@ -15,8 +15,6 @@ from dataclasses import dataclass, field
 from tmd_plain.contract import DocType, FactValue, LineKind, SummaryLine
 from tmd_plain.extract.facts import Fact, Value
 from tmd_plain.generate.glossary import cold_terms, glossary, rain_terms
-
-TENTHS_FORMULA = "rain_area_tenths = floor(rain_area_pct / 10 + 0.5)"
 
 _KIND_OF_PREFIX: list[tuple[str, LineKind]] = [
     ("rain_", "rain"),
@@ -39,11 +37,6 @@ _KIND_OF_PREFIX: list[tuple[str, LineKind]] = [
 _ORDER: tuple[LineKind, ...] = ("rain", "temperature", "wind", "wave", "fog", "other")
 _RAIN_PLAIN = {"ฝน/ฝนฟ้าคะนอง": "ฝนหรือฝนฟ้าคะนอง"}
 _WAVE_QUAL = {"สูง": "สูง", "สูงประมาณ": "สูงราว", "สูงมากกว่า": "สูงกว่า", "ต่ำกว่า": "ต่ำกว่า"}
-_WAVE_WHERE = {
-    "wave": "ทะเลมีคลื่น",
-    "wave_offshore": "ห่างฝั่งคลื่น",
-    "wave_storm": "บริเวณที่มีฝนฟ้าคะนองคลื่น",
-}
 
 
 class GenerateError(ValueError):
@@ -63,10 +56,6 @@ def _num(v: Value) -> str:
 
 def _range(lo: Value, hi: Value) -> str:
     return _num(lo) if lo == hi else f"{_num(lo)}-{_num(hi)}"
-
-
-def _tenths(pct: Value) -> int:
-    return int(float(pct) / 10 + 0.5)
 
 
 def _join_names(names: list[str]) -> str:
@@ -121,109 +110,131 @@ def facts_dict(facts: list[Fact]) -> dict[str, FactValue]:
     return out
 
 
-def _with_glossary(phrase: str, terms: list[str], gl: dict[str, str], used: list[str]) -> str:
-    # คำเดียวกับวลีไม่ต้องพูดซ้ำ: "อากาศเย็น (คือ ...)"
-    notes = [
-        f"คือ {gl[t]}" if t == phrase else f"{t} คือ {gl[t]}"
-        for t in terms
-        if t in gl and t not in used
-    ]
-    used += [t for t in terms if t in gl and t not in used]
-    return f"{phrase} ({', '.join(notes)})" if notes else phrase
+SEP = " · "
+UNIT_C = "°C"
+
+
+def _notes(terms: list[str], gl: dict[str, str], used: list[str]) -> list[str]:
+    """ความหมายของคำที่ยังไม่เคยอ้างในบรรทัดนี้ ("ฝนหนัก คือ ฝน 35.1-90.0 มิลลิเมตร")."""
+    fresh = [t for t in terms if t in gl and t not in used]
+    used += fresh
+    return [f"{t} คือ {gl[t]}" for t in fresh]
+
+
+def _qualify(parts: list[str], f: Fact) -> None:
+    """ส่วนขยายพื้นที่/ช่วงวัน ต่อท้ายท่อนก่อนหน้า (ไม่มีท่อนก่อนหน้า = เป็นท่อนเอง)."""
+    if parts:
+        parts[-1] = f"{parts[-1]} {f.value}"
+    else:
+        parts.append(str(f.value))
 
 
 def _rain_text(
-    g: _Group, lines: Sequence[str], gl: dict[str, str], used: list[str], area_word: str
-) -> str:
+    g: _Group, lines: Sequence[str], gl: dict[str, str], used: list[str]
+) -> tuple[str, list[str], list[str]]:
+    """(ข้อความ, detail รายชื่อจังหวัด, notes ความหมายระดับฝน)."""
     parts: list[str] = []
+    detail: list[str] = []
+    notes: list[str] = []
     by: dict[str, Value] = {}
+    event = ""  # ท่อนเหตุการณ์ล่าสุด ใช้นำหน้ารายชื่อจังหวัดที่ตามมา (ฝนตกหนักบางแห่ง บริเวณจังหวัด...)
     i = 0
     facts = g.facts
+    # นำหน้าด้วยเหตุการณ์เฉพาะเมื่อมีหลายชุดจังหวัด (ไม่งั้นคลุมเครือว่าชุดไหนของท่อนไหน)
+    runs = sum(
+        1
+        for k, f in enumerate(facts)
+        if f.name == "province" and (k == 0 or facts[k - 1].name != "province")
+    )
     while i < len(facts):
         f = facts[i]
         by[f.name] = f.value
         if f.name == "rain_area_pct_high":
             kind = str(by.get("rain_kind", "ฝน"))
             lo, hi = by["rain_area_pct_low"], f.value
-            tenths = _range(_tenths(lo), _tenths(hi))
-            parts.append(
-                f"มี{_RAIN_PLAIN.get(kind, kind)}ร้อยละ {_range(lo, hi)} ของพื้นที่ (ราว {tenths} ใน 10 ส่วนของ{area_word})"
-            )
+            parts.append(f"{_RAIN_PLAIN.get(kind, kind)} ร้อยละ {_range(lo, hi)} ของพื้นที่")
+            event = ""
         elif f.name == "province":
             names = [str(f.value)]
             while i + 1 < len(facts) and facts[i + 1].name == "province":
                 i += 1
                 names.append(str(facts[i].value))
             lead = "ส่วนมากที่จังหวัด" if "ส่วนมาก" in lines[f.line] else "บริเวณจังหวัด"
-            parts.append(f"{lead}{_join_names(names)}")
+            detail.append(f"{event if runs > 1 else ''} {lead}{_join_names(names)}".strip())
         elif f.name in ("heavy_rain", "very_heavy_rain", "light_rain"):
-            parts.append(_with_glossary(f"มี{f.value}", rain_terms(str(f.value)), gl, used))
-        elif f.name in ("some_rain", "gusts", "hail"):
-            parts.append(f"มี{f.value}")
-        elif f.name in ("area_part", "period_text"):
+            notes += _notes(rain_terms(str(f.value)), gl, used)
             parts.append(str(f.value))
+            event = str(f.value)
+        elif f.name in ("some_rain", "gusts", "hail"):
+            parts.append(str(f.value))
+            event = str(f.value)
+        elif f.name in ("area_part", "period_text"):
+            _qualify(parts, f)
         i += 1
-    return " ".join(parts)
+    return SEP.join(parts), detail, notes
 
 
-def _temperature_text(g: _Group, gl: dict[str, str], used: list[str]) -> str:
+def _temperature_text(g: _Group, gl: dict[str, str], used: list[str]) -> tuple[str, list[str]]:
     v = {f.name: f.value for f in g.facts}
     parts: list[str] = []
+    notes: list[str] = []
     for f in g.facts:
         if f.name == "cold":
-            parts.append(_with_glossary(str(f.value), cold_terms(str(f.value)), gl, used))
+            notes += _notes(cold_terms(str(f.value)), gl, used)
+            parts.append(str(f.value))
         elif f.name == "temp_trend":
             change = (
-                f" {_range(v['temp_change_low'], v['temp_change_high'])} องศาเซลเซียส"
+                f" {_range(v['temp_change_low'], v['temp_change_high'])} {UNIT_C}"
                 if "temp_change_low" in v
                 else ""
             )
-            parts.append(f"อุณหภูมิจะ{f.value}{change}")
+            parts.append(f"อุณหภูมิ{f.value}{change}")
         elif f.name == "temp_min_high":
-            parts.append(f"อุณหภูมิต่ำสุด {_range(v['temp_min_low'], f.value)} องศาเซลเซียส")
+            parts.append(f"ต่ำสุด {_range(v['temp_min_low'], f.value)} {UNIT_C}")
         elif f.name == "temp_max_high":
-            lead = "สูงสุด" if "temp_min_high" in v else "อุณหภูมิสูงสุด"
-            parts.append(f"{lead} {_range(v['temp_max_low'], f.value)} องศาเซลเซียส")
+            parts.append(f"สูงสุด {_range(v['temp_max_low'], f.value)} {UNIT_C}")
         elif f.name == "peak_temp_min_high":
             feel = str(v.get("peak_feel", ""))
-            head = f"บน{v['peak_place']}" + (
-                f" {_with_glossary(feel, cold_terms(feel), gl, used)}" if feel else ""
-            )
-            parts.append(f"{head} ต่ำสุด {_range(v['peak_temp_min_low'], f.value)} องศาเซลเซียส")
+            notes += _notes(cold_terms(feel), gl, used)
+            head = f"บน{v['peak_place']}" + (f" {feel}" if feel else "")
+            parts.append(f"{head} ต่ำสุด {_range(v['peak_temp_min_low'], f.value)} {UNIT_C}")
         elif f.name in ("area_part", "period_text"):
-            parts.append(str(f.value))
-    return " ".join(parts)
+            _qualify(parts, f)
+    return SEP.join(parts), notes
 
 
 def _wind_text(g: _Group) -> str:
     v = {f.name: f.value for f in g.facts}
     parts: list[str] = []
-    if g.area:
-        parts.append(f"{g.area}:")
     if "wind_dir" in v:
-        direction = "ลมแปรปรวน" if v["wind_dir"] == "แปรปรวน" else f"ลมพัดจากทิศ{v['wind_dir']}"
-        speed = _range(v["wind_speed_kmh_low"], v["wind_speed_kmh_high"])
+        direction = "ลมแปรปรวน" if v["wind_dir"] == "แปรปรวน" else f"ลม{v['wind_dir']}"
         if "wind_speed_kt_low" in v:
-            # พยากรณ์เดินเรือให้ทั้งนอตและ กม./ชม. ตามต้นฉบับ (ไม่แปลงหน่วยเอง)
-            knots = _range(v["wind_speed_kt_low"], v["wind_speed_kt_high"])
-            parts.append(f"{direction} ความเร็ว {knots} นอต ({speed} กม./ชม.)")
+            # พยากรณ์เดินเรือแสดงนอตตามที่ผู้ใช้ทะเลอ่าน ค่า กม./ชม. ของต้นฉบับยังอยู่ใน facts
+            speed = f"{_range(v['wind_speed_kt_low'], v['wind_speed_kt_high'])} นอต"
         else:
-            parts.append(f"{direction} ความเร็ว {speed} กม./ชม.")
+            speed = f"{_range(v['wind_speed_kmh_low'], v['wind_speed_kmh_high'])} กม./ชม."
+        parts.append(f"{direction} {speed}")
     if "strong_wind" in v:
-        parts.append("มีลมแรง")
-    return " ".join(parts)
+        parts.append("ลมแรง")
+    text = SEP.join(parts)
+    return f"{g.area}: {text}" if g.area and text else text
+
+
+# ชื่อต้นของคำบอกคลื่นแต่ละแบบ: ทั่วไป / ห่างฝั่ง / บริเวณที่มีฝนฟ้าคะนอง
+_WAVE_WHERE = {"wave": "คลื่น", "wave_offshore": "ห่างฝั่ง", "wave_storm": "ที่ฝนฟ้าคะนอง"}
 
 
 def _wave_text(g: _Group) -> str:
     v = {f.name: f.value for f in g.facts}
-    parts: list[str] = [f"{g.area}:"] if g.area else []
+    parts: list[str] = []
     for prefix, where in _WAVE_WHERE.items():
         if f"{prefix}_m_low" in v:
             qual = _WAVE_QUAL.get(str(v[f"{prefix}_qualifier"]), str(v[f"{prefix}_qualifier"]))
-            parts.append(
-                f"{where}{qual} {_range(v[f'{prefix}_m_low'], v[f'{prefix}_m_high'])} เมตร"
-            )
-    return " ".join(parts)
+            height = _range(v[f"{prefix}_m_low"], v[f"{prefix}_m_high"])
+            lead = f"{where}{qual}" if prefix == "wave" else f"{where} {qual}"
+            parts.append(f"{lead} {height} ม.")
+    text = SEP.join(parts)
+    return f"{g.area}: {text}" if g.area and text else text
 
 
 def build_lines(
@@ -232,40 +243,35 @@ def build_lines(
     doc_type: DocType,
     *,
     gl: dict[str, str] | None = None,
-    area_word: str = "พื้นที่ภาค",
 ) -> list[SummaryLine]:
     """ค่าของบล็อก (หรือของช่วงวัน) -> ประโยคสรุปเรียงตามชนิด ฝน อุณหภูมิ ลม คลื่น หมอก อื่นๆ.
 
-    gl = อภิธานที่ใช้ (ไม่ระบุ = ของชนิดนั้นตามหมายเหตุ TMD) · area_word = คำเรียกพื้นที่ในวงเล็บของร้อยละ
+    gl = อภิธานที่ใช้ (ไม่ระบุ = ของชนิดนั้นตามหมายเหตุ TMD)
     """
     gl = glossary(doc_type) if gl is None else gl
     out: list[SummaryLine] = []
     for g in _group(facts):
         used: list[str] = []
+        detail: list[str] = []
+        notes: list[str] = []
         if g.kind == "rain":
-            text = _rain_text(g, lines, gl, used, area_word)
+            text, detail, notes = _rain_text(g, lines, gl, used)
         elif g.kind == "temperature":
-            text = _temperature_text(g, gl, used)
+            text, notes = _temperature_text(g, gl, used)
         elif g.kind == "wind":
             text = _wind_text(g)
         elif g.kind == "wave":
             text = _wave_text(g)
         else:
-            text = " ".join(f"มี{f.value}" for f in g.facts if f.name in ("fog", "cloud"))
+            text = SEP.join(str(f.value) for f in g.facts if f.name in ("fog", "cloud"))
+        if not text.strip() and detail:
+            text = detail.pop(0)  # ไม่มีท่อนหลัก (มีแต่จังหวัด) ให้ท่อนแรกเป็นข้อความ
         if not text.strip():
             continue
         facts_out = facts_dict(g.facts)
-        for side in ("low", "high"):
-            pct = facts_out.get(f"rain_area_pct_{side}")
-            if isinstance(pct, list):
-                facts_out[f"rain_area_tenths_{side}"] = [str(_tenths(x)) for x in pct]
-            elif pct is not None:
-                facts_out[f"rain_area_tenths_{side}"] = _tenths(pct)  # type: ignore[arg-type]
-        if "rain_area_pct_low" in facts_out:
-            facts_out["derived_formula"] = TENTHS_FORMULA
         if used:
             facts_out["glossary_terms"] = used
-        out.append(SummaryLine(kind=g.kind, text=text, facts=facts_out))
+        out.append(SummaryLine(kind=g.kind, text=text, facts=facts_out, detail=detail, notes=notes))
     if not out:
         raise GenerateError("ไม่มีค่าที่ดึงได้ในบล็อกนี้")
     return out

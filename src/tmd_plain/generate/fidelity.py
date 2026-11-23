@@ -1,9 +1,8 @@
 """ตรวจความซื่อตรงของผลสรุปเทียบต้นฉบับ (F1-F5) คืนรายการข้อผิดพลาด ว่าง = ผ่าน.
 
-F1 ตัวเลขในประโยคของภาคต้องอยู่ในบล็อกต้นฉบับของภาคนั้น ยกเว้น (ADR 0013)
-   ก) ค่าที่คำนวณตามสูตรที่ประกาศใน facts (ราว N ใน 10 ส่วน) ซึ่งตรวจโดยคำนวณซ้ำ
-   ข) ตัวเลขของคำในอภิธาน TMD ที่ประโยคนั้นอ้าง (facts.glossary_terms)
-F2 ชื่อจังหวัดในประโยคต้องอยู่ในบล็อกต้นฉบับ · F3 คำแนะนำเป็นสตริงย่อยของต้นฉบับ (ปรับช่องว่าง)
+F1 ตัวเลขในประโยคของภาคต้องอยู่ในบล็อกต้นฉบับของภาคนั้น (ADR 0020: ไม่มีค่าที่คำนวณในข้อความแล้ว)
+   และทุกรายการใน notes ต้องตรงอภิธาน TMD ตามคำใน facts.glossary_terms (ตัวเลขของนิยามมาจากหมายเหตุของ TMD)
+F2 ชื่อจังหวัดในประโยค (text และ detail) ต้องอยู่ในบล็อกต้นฉบับ · F3 คำแนะนำเป็นสตริงย่อยของต้นฉบับ (ปรับช่องว่าง)
 F4 ห้ามมีคำว่าโอกาส + ตัวเลข % หรือ "ความน่าจะเป็น" · F5 ตามมาจาก F1 (ตรวจกับบล็อกของภาคตัวเองเท่านั้น)
 """
 
@@ -21,10 +20,6 @@ CHANCE = re.compile(r"โอกาส[^\n]{0,30}?\d+\s*%|ความน่า�
 _SPACE = re.compile(r"\s+")
 
 
-def _as_list(value: object) -> list[str]:
-    return [str(v) for v in value] if isinstance(value, list) else [str(value)]
-
-
 def _norm(text: str) -> str:
     return _SPACE.sub("", text)
 
@@ -33,26 +28,18 @@ def line_errors(line: SummaryLine, block: str, gl: dict[str, str], where: str) -
     """F1 F2 F4 ของประโยคหนึ่งเทียบบล็อกต้นฉบับ (ใช้ร่วมกับชนิดอื่น เช่น พยากรณ์เดินเรือ)."""
     errors: list[str] = []
     allowed = set(_NUM.findall(block))
-    terms = line.facts.get("glossary_terms", [])
-    for term in terms if isinstance(terms, list) else []:
-        allowed |= set(_NUM.findall(gl.get(term, "")))
-    if "rain_area_tenths_low" in line.facts:
-        # "ราว N ใน 10 ส่วน": N คำนวณซ้ำจากร้อยละตามสูตร, 10 เป็นค่าคงที่ของสูตร
-        allowed.add("10")
-        for side in ("low", "high"):
-            pcts = _as_list(line.facts[f"rain_area_pct_{side}"])
-            tenths = _as_list(line.facts[f"rain_area_tenths_{side}"])
-            for pct, got in zip(pcts, tenths, strict=True):
-                if got != str(int(float(pct) / 10 + 0.5)):
-                    errors.append(f"F1 ค่าคำนวณไม่ตรงสูตร {where}: {got}")
-                allowed.add(got)
     for n in _NUM.findall(line.text):
         if n not in allowed:
             errors.append(f"F1 ตัวเลข {n} ไม่มีที่มา {where}: {line.text}")
-    for m in PROVINCE_RE.finditer(line.text):
+    terms = line.facts.get("glossary_terms", [])
+    known = {f"{t} คือ {gl[t]}" for t in (terms if isinstance(terms, list) else []) if t in gl}
+    for note in line.notes:
+        if note not in known:
+            errors.append(f"F1 ความหมายระดับไม่ตรงอภิธาน TMD {where}: {note}")
+    for m in PROVINCE_RE.finditer(" ".join([line.text, *line.detail])):
         if m.group(0) not in block:
             errors.append(f"F2 จังหวัด {m.group(0)} ไม่อยู่ในต้นฉบับ {where}")
-    if CHANCE.search(line.text):
+    if CHANCE.search(" ".join([line.text, *line.detail, *line.notes])):
         errors.append(f"F4 ใช้คำว่าโอกาส/ความน่าจะเป็น {where}: {line.text}")
     return errors
 

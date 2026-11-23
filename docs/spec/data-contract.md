@@ -43,10 +43,10 @@ RegionSummary {
   advice: AdviceItem[]        // เฉพาะภาคนี้
 }
 Period { start: string, end: string, lines: SummaryLine[] }   // วันที่ ISO
-SummaryLine { kind: "rain"|"temperature"|"wind"|"wave"|"fog"|"other", text: string, facts: object }
+SummaryLine { kind: "rain"|"temperature"|"wind"|"wave"|"fog"|"other", text: string, facts: object, detail?: string[], notes?: string[] }   // detail/notes: ADR 0020 (ว่าง = ไม่มีในไฟล์)
 AdviceItem { text: string, scope: <region_key>[], general: boolean, source_unit_id: string }
 ```
-- `text` ของ `SummaryLine` เป็นประโยคภาษาไทยที่เขียนตามแม่แบบ ส่วน `AdviceItem.text` คัดมาจากต้นฉบับตรงๆ
+- `text` ของ `SummaryLine` เป็นประโยคภาษาไทยกระชับที่เขียนตามแม่แบบ (ไม่มีวงเล็บขยายความ ไม่มีค่าที่คำนวณ) · `detail` = รายชื่อจังหวัดของประโยคฝน (พับ/กางในเว็บ) · `notes` = ความหมายระดับฝน/ความหนาวตามหมายเหตุ TMD ("ฝนหนัก คือ ฝน 35.1-90.0 มิลลิเมตร") เว็บรวมแสดงครั้งเดียวต่อหน้า ส่วน `AdviceItem.text` คัดมาจากต้นฉบับตรงๆ
 - `facts` เก็บค่าที่ดึงได้ (เช่น `rain_area_pct`, `temp_min`, `temp_max`) เพื่อใช้ตรวจ F1-F5
 - ไม่ใส่เวลาประมวลผลไว้ในไฟล์ผลลัพธ์ (เพื่อให้ผลซ้ำได้) ใส่ใน metadata ตอนโหลด
 

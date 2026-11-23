@@ -106,6 +106,13 @@
     "SummaryLine": {
       "additionalProperties": false,
       "properties": {
+        "detail": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Detail",
+          "type": "array"
+        },
         "facts": {
           "additionalProperties": {
             "anyOf": [
@@ -143,6 +150,13 @@
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
         },
         "text": {
           "minLength": 1,

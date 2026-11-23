@@ -22,6 +22,9 @@ export const summaryLineSchema = z.strictObject({
   kind: lineKindSchema,
   text: z.string().min(1),
   facts: z.record(z.string(), factValueSchema).default({}),
+  // ข้อความรอง (รายชื่อจังหวัด) และความหมายระดับฝน/หนาวตามหมายเหตุ TMD (ADR 0020)
+  detail: z.array(z.string()).default([]),
+  notes: z.array(z.string()).default([]),
 });
 
 export const periodSchema = z

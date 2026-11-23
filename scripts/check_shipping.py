@@ -35,10 +35,14 @@ def _area_numbers_missing(issue: ShippingIssue, details: ShippingDetails) -> lis
     for key in SEA_AREA_KEYS:
         block = details.parsed.areas[key]
         area = issue.areas[key]
-        said = " ".join(
-            ln.text for ln in (*area.lines, *(ln for p in area.parts for ln in p.lines))
-        )
+        all_lines = (*area.lines, *(ln for p in area.parts for ln in p.lines))
+        said = " ".join(ln.text for ln in all_lines)
         have = set(_NUM.findall(said))
+        # ADR 0020: ข้อความแสดงนอตอย่างเดียว ค่า กม./ชม. ของต้นฉบับอยู่ใน facts ถือว่าไม่ตกหล่น
+        for ln in all_lines:
+            for value in ln.facts.values():
+                if isinstance(value, int | float) and not isinstance(value, bool):
+                    have.add(str(value))
         for n in _NUM.findall(" ".join(block.all_lines())):
             if n not in have:
                 out.append(f"{key}: ตัวเลข {n} ในต้นฉบับไม่อยู่ในสรุป")

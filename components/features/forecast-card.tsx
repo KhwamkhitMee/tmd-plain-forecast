@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 
 import { AdviceList } from "@/components/features/advice-list";
+import { ExpandableText } from "@/components/features/expandable-text";
 import { LineIcon } from "@/components/features/line-icon";
 import { Card } from "@/components/ui/card";
 import type { RegionSummary, SummaryLine } from "@/lib/contract/issue";
@@ -28,6 +29,11 @@ export function SummaryLines({ lines }: { lines: SummaryLine[] }) {
             {LINE_KIND_LABELS[line.kind]}
           </dt>
           <dd className="mt-0.5 text-body-md text-ink">{line.text}</dd>
+          {line.detail.map((item) => (
+            <dd key={item} className="mt-1">
+              <ExpandableText text={item} />
+            </dd>
+          ))}
         </div>
       ))}
     </dl>

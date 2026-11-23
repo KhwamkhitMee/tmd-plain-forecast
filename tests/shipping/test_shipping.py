@@ -138,12 +138,13 @@ def test_assemble_lines_and_advice() -> None:
     assert not hasattr(run, "error"), run
     issue: ShippingIssue = run.document  # type: ignore[union-attr,assignment]
     gulf = issue.areas["gulf_of_thailand"]
-    assert gulf.lines[0].text.startswith(
-        "มีฝนฟ้าคะนองร้อยละ 70 ของพื้นที่ (ราว 7 ใน 10 ส่วนของพื้นที่ทะเลบริเวณนี้)"
-    )
+    assert gulf.lines[0].text.startswith("ฝนฟ้าคะนอง ร้อยละ 70 ของพื้นที่")
+    assert "ใน 10" not in gulf.lines[0].text
     assert "ตอนล่าง" in gulf.lines[0].text
-    assert gulf.parts[0].lines[0].text == "ลมพัดจากทิศตะวันออก ความเร็ว 8-16 นอต (15-30 กม./ชม.)"
-    assert gulf.parts[1].lines[0].text == "ลมแปรปรวน ความเร็ว 8-16 นอต (15-30 กม./ชม.)"
+    # ADR 0020: เดินเรือแสดงนอตอย่างเดียว ค่า กม./ชม. ของต้นฉบับยังอยู่ใน facts
+    assert gulf.parts[0].lines[0].text == "ลมตะวันออก 8-16 นอต"
+    assert gulf.parts[0].lines[0].facts["wind_speed_kmh_low"] == 15
+    assert gulf.parts[1].lines[0].text == "ลมแปรปรวน 8-16 นอต"
     assert [a.text for a in issue.advice] == ["ชาวเรือควรเดินเรือด้วยความระมัดระวัง"]
     assert all(line.facts["unit_role"] == "cause" for line in issue.overview)
     assert issue.source_label == "ออกประกาศ 03 พฤศจิกายน 2569 13:00 น."

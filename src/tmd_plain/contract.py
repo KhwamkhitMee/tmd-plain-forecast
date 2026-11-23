@@ -74,6 +74,11 @@ class SummaryLine(_Model):
     kind: LineKind
     text: str = Field(min_length=1)
     facts: dict[str, FactValue] = Field(default_factory=dict)
+    # ข้อความรอง (ADR 0020): รายชื่อจังหวัดของประโยคฝน ใช้พับ/กางในหน้าเว็บ · ว่าง = ไม่เขียนลงไฟล์ (exclude_if)
+    # จึงข้อความที่คัดจากต้นฉบับ (เตือนภัย รายสัปดาห์ ฯลฯ) เหมือนเดิมทุกไบต์
+    detail: list[str] = Field(default_factory=list, exclude_if=lambda v: not v)
+    # ความหมายของระดับฝน/ความหนาวตามหมายเหตุของ TMD ("ฝนหนัก คือ ฝน 35.1-90.0 มิลลิเมตร") หน้าเว็บรวมแสดงครั้งเดียวต่อหน้า
+    notes: list[str] = Field(default_factory=list, exclude_if=lambda v: not v)
 
 
 class Period(_Model):

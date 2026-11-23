@@ -3,9 +3,11 @@ import { ViewTransition } from "react";
 import { AdviceList } from "@/components/features/advice-list";
 import { ForecastCard } from "@/components/features/forecast-card";
 import { Card } from "@/components/ui/card";
+import { Disclosure } from "@/components/ui/disclosure";
 import { REGION_KEYS, type Issue, type RegionKey } from "@/lib/contract/issue";
 import { cn } from "@/lib/cn";
 import { REGION_LABELS } from "@/lib/format/thai";
+import { collectNotes } from "@/lib/notes";
 
 type IssueSummaryProps = {
   issue: Issue;
@@ -20,6 +22,10 @@ type IssueSummaryProps = {
 // การ์ดคีย์เดิมเป็น element เดิม จึงเป็น update ไม่ใช่ share · default="none" กันทรานสิชันอื่นที่ไม่เกี่ยว
 export function IssueSummary({ issue, region = null }: IssueSummaryProps) {
   const regions = region ? [region] : REGION_KEYS;
+  // ความหมายระดับฝน/ความหนาวของการ์ดที่แสดงอยู่ รวมเป็นกล่องพับเดียว (ADR 0020) ไม่แทรกทุกบรรทัด
+  const notes = collectNotes(
+    regions.flatMap((key) => [...issue.regions[key].lines, ...issue.regions[key].periods.flatMap((p) => p.lines)]),
+  );
   return (
     <>
       {issue.general_advice.length > 0 ? (
@@ -54,6 +60,16 @@ export function IssueSummary({ issue, region = null }: IssueSummaryProps) {
           </ViewTransition>
         ))}
       </div>
+
+      {notes.length > 0 ? (
+        <Disclosure summary="ความหมายระดับฝนและอากาศ (ตามหมายเหตุของ TMD)">
+          <ul className="space-y-1.5 text-body-md text-ink">
+            {notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </Disclosure>
+      ) : null}
     </>
   );
 }
